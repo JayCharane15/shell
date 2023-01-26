@@ -13,6 +13,7 @@
 #define MAX 50
 #define READ_END 0
 #define WRITE_END 1 
+#define MIN 0
 
 char PATH[50][50] = {"/usr/local/sbin","/usr/local/bin","/usr/sbin","/usr/bin","/sbin","/bin","/usr/games","/usr/local/games","/snap/bin","/snap/bin"};
 int path_num = 10;
