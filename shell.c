@@ -8,7 +8,8 @@
 #include<stdlib.h>
 #include <fcntl.h>
 #include<sys/stat.h>
-
+#include <signal.h>
+#include <ctype.h>
 
 #define MAX 50
 #define READ_END 0
@@ -20,6 +21,10 @@ int path_num = 10;
 
 char history[50][50];
 int commands_count = 0;
+
+void handle_sigtstp(int sig);
+
+
 
 
 char* remove_red_spaces(char* str)
@@ -139,14 +144,34 @@ char** string_to_word(char* str)
 
 int main()
 {
+    struct sigaction sa;
+    sa.sa_handler = &handle_sigtstp;
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGTSTP, &sa, NULL);
+
+    
+    
+    
     int pid;
 
     char prompt[100];
     getcwd(prompt,sizeof(prompt));
+    strcpy(PATH[path_num++],prompt);
     strcat(prompt,"$ ");
     
     
-    strcpy(PATH[path_num++],prompt);
+
+    char** part1 = malloc(sizeof(char*)*50);
+    char** part2 = malloc(sizeof(char*)*50);
+    for(int i = 0; i < 50; i++)
+    {
+        part1[i] = malloc(sizeof(char)*50);
+        part2[i] = malloc(sizeof(char)*50);
+    }
+    char full_path1[100];
+    char full_path2[100];
+
+    int fd[2];
 
 
 
@@ -167,6 +192,7 @@ int main()
         }
         else
         {
+            // printf("%s\n",buf);
             char* res = malloc(sizeof(char)*50);
             res = remove_red_spaces(buf);
             strcpy(buf,res);
@@ -329,11 +355,11 @@ int main()
                 
                 char** temp = string_to_word(token);
                 char** redirect = malloc(sizeof(char*)*20);
-                int fd;
+                int fd_redirect;
                 int k = 0;
                 int redirect_flag = 0;
                 int rediect_flag1 = 0;
-                // int pipe_flag = 0;
+                int pipe_flag = 0;
                 while(temp[k])
                 {
                     if(strcmp(temp[k], ">") == 0)
@@ -349,108 +375,253 @@ int main()
                         break;
 
                     }
+                    if(strcmp(temp[k], "|") == 0)
+                    {
+                        pipe_flag = 1;
+                        // printf("Pipe detected");
+                        break;
+                    }
                     k++;
                 }
 
-                pid = fork();
-                // printf("Fork is being called");
-
-                char full_path[100];
-
-                if(pid == 0)
+                if(pipe_flag)
                 {
-                    if(redirect_flag)
+
+                    // printf("PART1: ");
+                    for(int i = 0; i < k; i++)
                     {
-                        // printf("\nOp redirection detected");
-                        close(1);
-                        fd = open(temp[++k],O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
-                        if(fd == -1)
-                        {
-                            perror("Open failed: ");
-                        }
-                        k--;
-                        int i;
-                        for(i=0;i<k;i++)
-                        {
-                            redirect[i] = temp[i];
-                        }
-                        redirect[i] = NULL;
+                        strcpy(part1[i], temp[i]);
+                        // printf("%s\n",part1[i]);
 
-                        strcpy(full_path,"/bin/");
-                        strcat(full_path,redirect[0]);
-                        
-                        int ret = execv(full_path,redirect);
-                        if(ret == -1)
+                        if(i == k-1)
                         {
-                            perror("Execution failed: ");
-                            exit(errno);
+                            part1[k] = NULL;
 
                         }
-                        close(1);
-                        // char* file = stdout;
-                        // open();
-                        
-
                     }
-                    else if(rediect_flag1)
+
+                    k++;
+                    int i = 0;
+                    // printf("PART2: ");
+                    while(temp[k])
                     {
-                        close(0);
-                        fd = open(temp[++k],O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
-                        if(fd == -1)
-                        {
-                            perror("Open failed: ");
-                        }
-                        k--;
-                        int i;
-                        for(i=0;i<k;i++)
-                        {
-                            redirect[i] = temp[i];
-                        }
-                        redirect[i] = NULL;
-
-                        strcpy(full_path,"/bin/");
-                        strcat(full_path,redirect[0]);
-                    
                         
-                        int ret = execv(full_path,redirect);
-                        if(ret == -1)
+                        //printf("temp[k] is %s\n",temp[k]);
+                        strcpy(part2[i], temp[k++]);
+                        // printf("part[2] is %s\n",part2[i]);
+                        i++;
+                    }
+                    part2[i] = NULL;
+
+                    for(int i = 0; i < path_num; i++)
+                    {
+                        strcpy(full_path1, PATH[i]);
+                        strcat(full_path1,"/");
+                        strcat(full_path1, part1[0]);
+                        FILE* fp = fopen(full_path1,"r");
+                        if(fp != NULL)
                         {
-                            // printf("Entered here");
-                            perror("Execution failed: ");
-                            exit(errno);
-
+                            // printf("PATH1 is %s\n",full_path1);
+                            break;
                         }
+                    }
 
+                     for(int i = 0; i < path_num; i++)
+                    {
+                        strcpy(full_path2, PATH[i]);
+                        strcat(full_path2,"/");
+                        strcat(full_path2, part2[0]);
+                        FILE* fp = fopen(full_path2,"r");
+                        if(fp != NULL)
+                        {
+                            // printf("PATH2 is %s\n",full_path2);
+                            
+                            break;
+                        }
+                    }
 
+                    if(pipe(fd) == -1)
+                    {
+                        fprintf(stderr, "Pipe failed");
+                        return 1;
+                    }
+                    pid = fork();
+
+                    if(pid == 0)
+                    {
+                        dup2(fd[READ_END], STDIN_FILENO);
+                        close(fd[READ_END]);
+                        close(fd[WRITE_END]);
+                        execv(full_path2, part2);
                     }
                     else
                     {
-                        for(int i = 0; i < path_num; i++)
+                        dup2(fd[WRITE_END], STDOUT_FILENO);
+                        close(fd[READ_END]);
+                        close(fd[WRITE_END]);
+                        execv(full_path1, part1);
+                        wait(0);
+                    }
+
+                    // pid = fork();
+
+
+                }
+                else
+                {
+
+                    pid = fork();
+                    // printf("Fork is being called");
+
+                    char full_path[100];
+
+                    if(pid == 0)
+                    {
+                        if(redirect_flag)
                         {
+                            // printf("\nOp redirection detected");
+                            close(1);
+                            fd_redirect = open(temp[++k],O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
+                            if(fd_redirect == -1)
+                            {
+                                perror("Open failed: ");
+                            }
+                            k--;
+                            int i;
+                            for(i=0;i<k;i++)
+                            {
+                                redirect[i] = temp[i];
+                            }
+                            redirect[i] = NULL;
 
-                            strcpy(full_path,PATH[i]);
-                            strcat(full_path,"/");
-                            strcat(full_path,newString[0]);
-                            // printf("Checkpoint 3\n");
-
-                            int ret = execv(full_path,newString);
-                            if(ret == -1 && i == path_num-1)
+                            strcpy(full_path,"/bin/");
+                            strcat(full_path,redirect[0]);
+                            
+                            int ret = execv(full_path,redirect);
+                            if(ret == -1)
                             {
                                 perror("Execution failed: ");
                                 exit(errno);
 
                             }
+                            close(1);
+                            // char* file = stdout;
+                            // open();
+                            
+
                         }
+                        else if(rediect_flag1)
+                        {
+                            close(0);
+                            fd_redirect = open(temp[++k],O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
+                            if(fd_redirect == -1)
+                            {
+                                perror("Open failed: ");
+                            }
+                            k--;
+                            int i;
+                            for(i=0;i<k;i++)
+                            {
+                                redirect[i] = temp[i];
+                            }
+                            redirect[i] = NULL;
+
+                            strcpy(full_path,"/bin/");
+                            strcat(full_path,redirect[0]);
+                        
+                            
+                            int ret = execv(full_path,redirect);
+                            if(ret == -1)
+                            {
+                                // printf("Entered here");
+                                perror("Execution failed: ");
+                                exit(errno);
+
+                            }
+
+
+                        }
+                        // else if(pipe_flag)
+                        // {
+                        //     // printf("Child entered here");
+                        //     // close(0);
+                        //     // dup(fd[READ_END]);
+                        //     // close(fd[WRITE_END]);
+                        //     // int ret1 = execv(full_path2, part2);
+                        //     // if(ret1 == -1)
+                        //     // {
+                        //     //     perror("Execution failed");
+                        //     //     return errno;
+                        //     // }
+                            
+                        //     dup2(fd[READ_END], STDIN_FILENO);
+                        //     close(fd[READ_END]);
+                        //     close(fd[WRITE_END]);
+                        //     execv(full_path2, part2);
+        
+
+                        // }
+                        else
+                        {
+                            for(int i = 0; i < path_num; i++)
+                            {
+
+                                strcpy(full_path,PATH[i]);
+                                strcat(full_path,"/");
+                                strcat(full_path,newString[0]);
+                                // printf("Checkpoint 3\n");
+
+                                int ret = execv(full_path,newString);
+                                if(ret == -1 && i == path_num-1)
+                                {
+                                    perror("Execution failed: ");
+                                    exit(errno);
+
+                                }
+                            }
+
+                        }
+                        
+                    
 
                     }
-                    
-                
+                    else
+                    {
+                        // if(pipe_flag)
+                        // {
+                        //     // printf("Parent entered here");
+                        //     // close(1);
+                        //     // dup(fd[WRITE_END]);
+                        //     // close(fd[READ_END]);
+                        //     // execv(full_path1, part1);
+                        //     // printf("Exiting now");
+                        //     // int ret2 = execv(full_path2, part2);
+                        //     // if(ret2 == -1)
+                        //     // {
+                        //     //     perror("Execution failed");
+                        //     //     return errno;
+                        //     // }
+                        //     // wait(NULL);
 
+
+                        //     dup2(fd[WRITE_END], STDOUT_FILENO);
+                        //     close(fd[READ_END]);
+                        //     close(fd[WRITE_END]);
+                        //     execv(full_path1, part1);
+
+                        //     wait(0);
+
+
+                            
+
+                        // }
+                        wait(0);
+                    
+                    }
                 }
-                else
-                {
-                    wait(0);
-                }
+                // int fd[2];
+
+
 
             }
 
@@ -460,6 +631,17 @@ int main()
 
     }
 
+    // close(fd[0]);
+    // close(fd[1]);
 
+    // waitpid(pid, NULL, 0);
     return 0;
+}
+
+
+void handle_sigtstp(int sig)
+{
+    // fflush(stdout)
+    printf("\n");
+    // main();
 }
